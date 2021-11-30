@@ -12,8 +12,8 @@ global{
 	
 	/////////////////////////////////       SHAPEFILES          /////////////////////////////////////////////////
 	
-	file<geometry>buildings_shapefile<-file<geometry>("./../includes/City/volpe/Buildings.shp");
-	file<geometry> roads_shapefile<-file<geometry>("./../includes/City/volpe/Roads_big.shp");
+	file<geometry>buildings_shapefile<-file<geometry>("../includes/Buildings.shp"); //wrong directory
+	file<geometry> roads_shapefile<-file<geometry>("../includes/Roads.shp"); //wrong directory
 	
 	//geometry shape<-envelope(roads_kendall_shapefile);
 	geometry shape<-envelope(roads_shapefile);
@@ -25,8 +25,8 @@ global{
 	// result files where granularity has been improved through ML techniques (can be used as an alternative to the results obtained directly through GAMA batch experiments in each case)
 	// each file corresponding to the results obtained when people's behavioural criteria change (calibrated criteria with real data or when some behavioural placeholder incentives are applied)
 	
-	file income_profile <- file("C:/Users/Youngju/Desktop/Gama_yj/Trial_11_14/includes/income_profile.csv");
-	file rent_subsidized_per_profile <- file("C:/Users/Youngju/Desktop/Gama_yj/Trial_11_14/includes/Rent_subsidize.csv");
+	file income_profile <- file("../includes/income_profile.csv"); //cannot be local
+	file rent_subsidized_per_profile <- file("../includes/rent_list.csv");
 	
 		
 	////////////////////////////////        PARAMETERS         ///////////////////////////////////////////////////////
@@ -61,6 +61,14 @@ global{
 	int minRentPrice;
 	int maxRentPrice;
 	int nb_unsettled; 
+	
+	//you need to specify these, I guessed the vaariables just not to have any errors
+	map<string,rgb> color_per_tier;
+	map<string,float> proportion_per_tier;
+	map<string,string> amenity_pref_per_tier;
+	map<string,string> fancy_pref_per_tier;
+	map<string,float> size_pref_per_tier;
+	map<string,float> income_per_tier_map;
 
 
 	//point startingPoint <- {1025, 1160}; //kendall_roads
@@ -80,7 +88,7 @@ global{
 	init{
 		do createBuildings;
 		do createRoads;
-		do characteristic_file_import;
+		//do characteristic_file_import; //it does not exist
 		do normaliseRents;
 		do importOriginalValues;
 		do createPopulation;	
@@ -89,6 +97,7 @@ global{
 	
 	action createBuildings{ //creation of buildings of the area of interest from the shapefile (those that are not being built in the grid). 
 		create building from: buildings_shapefile with:[usage::string(read("Usage")), rentPrice::float(read("PRICE")), category::read("Category"), scale::string(read("Scale")), heightValue::float(read("Max_Height"))]{
+		
 			if(usage != "R" or "O"){
 				rentPrice <- 0.0;
 			}
@@ -98,18 +107,20 @@ global{
 			float areaApartment <- listAreasApartment[scale];
 			building ImTheBuilding <- self;
 			int nbFloors <- heightValue/5;
-
+	
 			//out of the people who live and work within the area of interest, there are certain that live within the grid apartments (according to the Volpe occcupancy for Cambridge) 
 			// but those who live outside the grid need to be located in a building from the shapefile. This geolocation is not known, so a reduced number of apartments is created in 
 			// the buildings with Residential usage f(number of floors) to scatter the people throughout the area of interest
 			if(Density_Residential = 1){
 				if(usage = "R"){
-				create apartment number: int(areaBuilding / areaApartment*nbFloors *proportion_apart_reduction){
-					int numberApartment <- int(areaBuilding / areaApartment*nbFloors *proportion_apart_reduction);
-					rent <- rentPriceBuilding/(Developer_incentive+1);
-					associatedBuilding <- ImTheBuilding;
-					location <- associatedBuilding.location;
+					create apartment number: int(areaBuilding / areaApartment*nbFloors *proportion_apart_reduction){
+						int numberApartment <- int(areaBuilding / areaApartment*nbFloors *proportion_apart_reduction);
+						rent <- rentPriceBuilding/(Developer_incentive+1);
+						associatedBuilding <- ImTheBuilding;
+						location <- associatedBuilding.location;
+					}
 				}
+				
 			}
 			else{
 				if(usage = "R"){
@@ -121,8 +132,9 @@ global{
 					}
 				}
 				if(usage = "O"){
-					numberApartment_current <- 0;
-					loop i over: numberApartment_current > numberApartment_o {
+					int numberApartment_current <- 0;
+					//loop i over: numberApartment_current > numberApartment_o { //this line makes no sense. numberApartment_o is not defined
+					loop i over: numberApartment_current{
 						create apartment number: int(one_of(areaBuilding) / microUnitArea *nbFloors*proportion_office_reduction){
 							int numberApartment_current <- numberApartment_current + int(one_of(areaBuilding) / microUnitArea *nbFloors*proportion_office_reduction);
 							rent <- rentPriceBuilding/(Developer_incentive+1);
@@ -132,7 +144,9 @@ global{
 					}
 				}
 			}
-		}
+			
+	}		
+}
 	
 	
 	action normaliseRents{
@@ -154,7 +168,7 @@ global{
 			amenity_pref_per_tier[data_matrix[0,i]] <- data_matrix[3,i];
 			fancy_pref_per_tier[data_matrix[0,i]] <- data_matrix[4,i];
 			size_pref_per_tier[data_matrix[0,i]] <- data_matrix[5,i];
-			income_per_tier[data_matrix[0,i]] <- data_matrix[6,i];
+			income_per_tier_map[data_matrix[0,i]] <- data_matrix[6,i];
 		} 
 	}
 	
@@ -168,21 +182,28 @@ global{
 	
 	
 	action createPopulation{
-		int numberApartmentsVolpe <- count(apartment); //number of extra dwelling units available (built area is translated into dwelling units based on the CS vision -micro units are built 40m2 each-)
+		//it is not even used afterwards! and it throws an error
+		//int numberApartmentsVolpe <- count(apartment); //number of extra dwelling units available (built area is translated into dwelling units based on the CS vision -micro units are built 40m2 each-)
 		int nb_unsettled <- int(nb_people);
 		int countRemaining <- nb_unsettled;
+		list<people> all_people; //guessing here
+		list<building> all_building; //guessing here
 		create people number: int(nb_people){
 			liveInKendall <- false;	
-			tier <- prof_list.keys[rnd_choice(prof_list.values)]; //random choice based on the proportions of people present f (income profile)
-			income <- income_per_tier[tier];
+			//tier <- prof_list.keys[rnd_choice(prof_list.values)]; //random choice based on the proportions of people present f (income profile)
+			//prof list is a list of strings no sense to treat it as a map
+			tier <- one_of(prof_list); //guessing here??
+			float income <- income_per_tier_map[tier]; //there are two different variables with same name
 			color <- color_per_tier[tier]; 
 			all_people <- people as list; 
 			all_building <- building as list; 
 			current_place <- one_of(all_building where (each.category = "O")); 
 			ask people  {  
-			do move_to_new_place;       
+			do move_to_new_places;       
 		}
 		}
+	}
+
 }
 
 species apartment{
@@ -194,18 +215,21 @@ species building{
 	int nbFloors;
 	string usage;
 	string category;
-	float rentPriceBuilding;
+	float rentPrice;
 	float normalisedRentPrice;
 	float heightValue;
 	string scale;
 	int numberApartment;
+	list<people> insiders; //I am guessing here
 	
 	//Action to accept a people agent  
 	action accept (people one_people) {
 		add one_people to: insiders;
-		location of one_people <- livingPlace.associatedBuilding.location;
+		one_people.location <- one_people.livingPlace.associatedBuilding.location;
 		numberApartment <- numberApartment - 1;
 	}
+	//rethink these aspects!! if insiders is a list of people it makes no sense to calculate the mean, maybe you refer to a specific attribute
+	/*** 
 
 	aspect simple {
 		color <- empty(insiders) ? #white : rgb ([mean (insiders collect each.red), mean (insiders collect each.green), mean (insiders collect each.blue)]);
@@ -214,14 +238,16 @@ species building{
 	aspect gis {
 		color <- empty(insiders) ? #white : rgb( [mean (insiders collect each.red), mean (insiders collect each.green), mean (insiders collect each.blue)]);
 		draw shape color: color border: #black;
-	} 
+	} ***/
 	aspect highlighted {
 		color <- #blue;
 		draw shape+10 color: color;
 	}
-}
 	action normaliseRentPrice{
-		normalisedRentPrice <- (rentPrice - minRentPrice)/(maxRentPrice - minRentPrice);
+		if (maxRentPrice != minRentPrice){ //acoid division by zero
+			normalisedRentPrice <- (rentPrice - minRentPrice)/(maxRentPrice - minRentPrice);
+		}
+		
 	}
 	
 }
@@ -249,21 +275,28 @@ species people skills: [moving]{
 	float Density_Amenity;
 	building current_place;
 	bool liveInKendall;	
-	list<building> amenities <- all_building where (each.category = "cultural" or "HS" or "Night" or "Park" or "Restaurant" or "Shopping");
-	list<building> near_amenities <- amenities within walking_distance;
+	list<building> amenities <- building where (each.category = "cultural" or "HS" or "Night" or "Park" or "Restaurant" or "Shopping");
+	//list<amenities> near_amenities <- amenities within walking_distance;
 	action move_to_new_places{
 		if(liveInKendall=false){
 			option_place <- one_of(apartment); 
-			if ((normalisedRentPrice <= income_per_tier*0.4*Rent_Subsidy) and (near_amenities*Density_Amenity>=number_of_amenity_needed){
-			living_place <- option_place;
-			ask living_place {
-			do accept one_people: myself;   
-     		}
-			nb_unsettled <- nb_unsettled - 1; 
-			bool liveInKendall -> True;//remaining available dwelling units within the grid
+			if ((normalisedRentPrice <= income_per_tier*0.4*Rent_Subsidy) and (near_amenities*Density_Amenity>=number_of_amenity_needed)){
+				livingPlace <- option_place; //consistency!!!
+				ask livingPlace.associatedBuilding { //consistency!!! + accept belongs to building species not apartment species
+					do accept one_people: myself;   
+     			}
+				nb_unsettled <- nb_unsettled - 1; 
+				bool liveInKendall <- true;//remaining available dwelling units within the grid //booleans not in capital letter
 			}
+			
+		}
+	}
 	
-}}
+	aspect default{
+		draw circle(10) color: #white; //for instance
+	}
+
+}
 	
 	
 
@@ -273,15 +306,15 @@ experiment visual type:gui{
 	output{
 		display map type: opengl draw_env: false  autosave: false background: #black 
 			{
-			species building aspect: default;
+			species building aspect: highlighted; //there is no default aspect in building
 			species road aspect: default;
-			species minor_road aspect: default;
+			species road aspect: default;
 			//species entry_point aspect: default;
-			species people aspect: default;
+			species people aspect: default; //it did not exist
 			
 	    	}
 	    	
-		}    
+	}    
 }
 
 
